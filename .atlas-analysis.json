@@ -1,0 +1,62 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Parameter Golf",
+  "projectDescription": "A competitive challenge to train the best language model that fits within a 16MB artifact in under 10 minutes on 8xH100 GPUs, evaluated by bits-per-byte compression on the FineWeb validation set.",
+  "theme": "linden",
+  "primaryColor": "#b21e1e",
+  "lightColor": "#e59f82",
+  "darkColor": "#e0dbd9",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["introduction", "leaderboard"]
+          },
+          {
+            "group": "Getting Started",
+            "pages": ["getting-started/local-training", "getting-started/remote-gpu", "getting-started/data-setup"]
+          },
+          {
+            "group": "Concepts",
+            "pages": ["concepts/scoring", "concepts/model-architecture", "concepts/quantization", "concepts/tokenizer"]
+          },
+          {
+            "group": "Submission Guide",
+            "pages": ["submission/requirements", "submission/record-submissions", "submission/non-record-submissions"]
+          },
+          {
+            "group": "Reference",
+            "pages": ["reference/hyperparameters", "reference/environment-variables", "reference/data-pipeline", "reference/faq"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "16MB artifact size constraint (code bytes + compressed model bytes)",
+    "10-minute training time limit on 8xH100 GPUs",
+    "Tokenizer-agnostic bits-per-byte (BPB) evaluation on FineWeb validation set",
+    "Int8 per-row quantization + zlib compression for model serialization",
+    "Muon optimizer for matrix-shaped gradients with Newton-Schulz orthogonalization",
+    "Grouped Query Attention (GQA) transformer architecture",
+    "MLX training script for Apple Silicon local iteration",
+    "Multi-GPU distributed training via PyTorch torchrun",
+    "$1,000,000 in OpenAI compute credits available to participants",
+    "Public leaderboard with reproducibility requirements"
+  ],
+  "publicApiSurface": [
+    "train_gpt.py (main CUDA training script)",
+    "train_gpt_mlx.py (Apple Silicon MLX training script)",
+    "data/cached_challenge_fineweb.py --variant sp1024 --train-shards N",
+    "data/download_hf_docs_and_tokenize.py",
+    "Hyperparameters class (all env-var-configurable training settings)",
+    "GPT model class (transformer with GQA, RoPE, skip connections)",
+    "Muon optimizer",
+    "quantize_state_dict_int8() / dequantize_state_dict_int8()",
+    "eval_val() (BPB + val loss evaluation)",
+    "TokenStream / DistributedTokenLoader (data loading)"
+  ]
+}
