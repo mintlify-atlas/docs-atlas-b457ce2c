@@ -1,0 +1,126 @@
+---
+title: "Submission Requirements"
+description: "What every valid parameter-golf submission must include, from file structure to the submission.json format."
+---
+
+All submissions — whether record or non-record — must meet the requirements described on this page. Pull requests that are missing required files or contain broken scripts will not be accepted.
+
+## Artifact size limit
+
+The submission artifact is computed as **code bytes + compressed model bytes**. The cap is decimal 16 MB:
+
+```
+code bytes + compressed model bytes < 16,000,000 bytes
+```
+
+<Note>
+  The limit is 16,000,000 decimal bytes, not 16 MiB (16,777,216 bytes). Compressed model size is measured as the int8 + zlib roundtrip output of your model weights.
+</Note>
+
+## Required files
+
+Every submission folder must contain the following four files:
+
+<CardGroup cols={2}>
+  <Card title="README.md" icon="file-text">
+    Explains the submission in reasonable detail — architecture, training config, key metrics, and the command used to reproduce the run.
+  </Card>
+  <Card title="submission.json" icon="braces">
+    Structured metadata including your name, GitHub ID, `val_bpb`, and byte counts. See format below.
+  </Card>
+  <Card title="train.log" icon="scroll">
+    The exact training log automatically produced by your training script. Do not edit or truncate it.
+  </Card>
+  <Card title="train_gpt.py" icon="code">
+    The training script snapshot used for the run. It must compile and run successfully from within the records folder.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Broken scripts will not be accepted. Verify that `train_gpt.py` runs end-to-end from within the records folder before submitting.
+</Warning>
+
+## Folder structure and naming
+
+Submissions live under one of two tracks:
+
+```
+records/
+├── track_10min_16mb/          # Leaderboard (SOTA) records
+│   └── 2026-03-17_RunName/
+│       ├── README.md
+│       ├── submission.json
+│       ├── train.log
+│       └── train_gpt.py
+└── track_non_record_16mb/     # Non-record and unlimited compute
+    └── 2026-03-18_RunName/
+        ├── README.md
+        ├── submission.json
+        ├── train.log
+        └── train_gpt.py
+```
+
+Folder names use an ISO-8601 date prefix followed by a short descriptive name:
+
+```
+2026-03-17_NaiveBaseline
+2026-03-18_Quasi10Bfrom50B_SP1024_9x512_KV4_4h_pgut3
+```
+
+## submission.json format
+
+The `submission.json` file provides structured metadata for the leaderboard. All fields are required unless noted.
+
+```json
+{
+  "author": "Your Name",
+  "github_id": "your-github-id",
+  "name": "Run Name",
+  "blurb": "Brief description of your approach",
+  "date": "2026-03-18T14:56:29Z",
+  "val_loss": 2.07269931,
+  "val_bpb": 1.2243657,
+  "bytes_total": 15863489,
+  "bytes_code": 47642
+}
+```
+
+The baseline submission uses exactly this structure:
+
+```json
+{
+  "author": "Baseline",
+  "github_id": "openai",
+  "name": "Naive Baseline",
+  "blurb": "SP-1024 9x512 KV4 run on pgut1 using the published Hugging Face fineweb10B_sp1024 export and the current train_gpt.py; score is the default final int8+zlib roundtrip metric under the 16,000,000-byte cap.",
+  "date": "2026-03-18T14:56:29Z",
+  "val_loss": 2.07269931,
+  "val_bpb": 1.2243657,
+  "bytes_total": 15863489,
+  "bytes_code": 47642
+}
+```
+
+<Info>
+  `val_bpb` is the **post-quantization roundtrip** bits-per-byte score, printed as `final_int8_zlib_roundtrip_exact val_bpb` in your train log. This is the official score used for the leaderboard.
+</Info>
+
+## Evaluation constraints
+
+The following constraints apply to all submissions during evaluation:
+
+- No external downloads or network calls during evaluation
+- No access to training data during evaluation (unless those bits are counted within the 16 MB limit)
+- No data from outside the allowed FineWeb validation set
+
+<Warning>
+  The artifact must be fully self-contained and reproducible. Any submission that requires network access or external dependencies at evaluation time will be rejected.
+</Warning>
+
+## Submitting
+
+Submit your entry as a **pull request** that adds only your new folder to the appropriate `/records` subfolder. The PR should not modify any other files in the repository.
+
+<Tip>
+  See [Record Submissions](/submission/record-submissions) and [Non-Record Submissions](/submission/non-record-submissions) for track-specific requirements on top of these baseline requirements.
+</Tip>

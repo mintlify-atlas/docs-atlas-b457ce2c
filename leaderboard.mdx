@@ -1,0 +1,107 @@
+---
+title: "Leaderboard"
+description: "Current standings for the Parameter Golf challenge, scored by bits-per-byte on the FineWeb validation set."
+---
+
+The leaderboard tracks the best language models trained under a strict size and compute budget. All scores are measured in **bits-per-byte (BPB)** on the FineWeb validation set — lower is better.
+
+<Info>
+  The challenge runs from **March 18 to April 30, 2026**. OpenAI is sponsoring $1,000,000 in compute credits to help participants get started. [Request a compute grant](https://openai.com/index/parameter-golf/#credit-form).
+</Info>
+
+## Tracks
+
+<CardGroup cols={2}>
+  <Card title="10-min 16MB (Official)" icon="trophy">
+    The main competitive leaderboard. Submissions must train in under 10 minutes on 8xH100 SXM GPUs and fit within a 16MB artifact. New SOTA records require a 0.005-nat improvement over the current best.
+  </Card>
+  <Card title="Non-Record 16MB" icon="flask">
+    Open submissions for interesting approaches that don't meet the 10-minute compute limit or are experimental in nature. Still subject to the 16MB artifact cap. Results appear in the Notable Non-Record Runs table.
+  </Card>
+</CardGroup>
+
+## 10-min 16MB Leaderboard
+
+| Rank | Run | BPB Score | Author | Summary | Date |
+|-----:|-----|----------:|--------|---------|------|
+| 1 | Naive Baseline | 1.2244 | Baseline | 9-layer 512-dim 1024-vocab tied embeddings, 4 KV heads | 2026-03-18 |
+
+<Note>
+  Scores reflect the **post-quantization int8+zlib roundtrip** metric, which is the canonical evaluation result. The model artifact for the current record is 15,863,489 bytes total (15,815,847 bytes model + 47,642 bytes code).
+</Note>
+
+### Current Record: Naive Baseline
+
+The baseline entry establishes the starting point for the challenge. Key details:
+
+- **Architecture:** 9 layers, 512 model dim, 1024 vocab (SentencePiece BPE), 8 attention heads, 4 KV heads
+- **Tied embeddings:** Input and output embeddings are shared (`TIE_EMBEDDINGS=1`)
+- **Training stopped at:** step 13,780 of 20,000 (wallclock cap hit at ~600 seconds)
+- **Pre-quant BPB:** 1.2172 — **Post-quant BPB:** 1.2244
+- **Total tokens seen:** ~7.2B
+- **Peak GPU memory:** 10,184 MiB allocated
+
+## Notable Non-Record Runs
+
+These submissions are interesting or exploratory and don't meet the 10-minute compute constraint for the main leaderboard. They still satisfy the 16MB artifact limit.
+
+| Run | BPB Score | Author | Summary | Date |
+|-----|----------:|--------|---------|------|
+| 4-Hour Baseline | 1.2074 | Will DePue | Same 9x512 SP-1024 layout, unlimited compute — 4 hours on 8xH100 | 2026-03-18 |
+
+### Spotlight: 4-Hour Baseline
+
+This entry shows the performance ceiling of the baseline architecture given unrestricted compute time, establishing a useful reference point for what the 10-minute budget leaves on the table.
+
+- **Training time:** 4 hours (14,400 seconds) on 8xH100
+- **Steps completed:** 329,430 of 500,000
+- **Pre-quant BPB:** 1.1749 — **Post-quant BPB:** 1.2074
+- **Total tokens seen:** ~172.7B
+- **Artifact size:** 15,810,161 bytes total
+
+The ~0.017 BPB gap between this run and the 10-minute baseline shows there is meaningful room to improve — either by squeezing more out of the training budget or by changing the architecture and training recipe.
+
+## How Scoring Works
+
+<Accordion title="What is bits-per-byte (BPB)?">
+  BPB measures how well a model compresses text, expressed in bits per byte of raw UTF-8 input. It is **tokenizer-agnostic** — the denominator is always raw bytes, not tokens — which makes it a fair comparison across submissions that use different vocabularies or tokenization schemes.
+
+  A perfect compressor approaches the entropy of English text (~1.0 BPB). Lower values indicate better compression and, by proxy, better language modeling.
+
+  The official score is the **post-quantization roundtrip BPB**: the model is serialized to int8+zlib format, deserialized, and then evaluated. This captures the real-world fidelity cost of compression.
+</Accordion>
+
+<Accordion title="What counts toward the 16MB artifact size?">
+  The artifact is: **code bytes + compressed model bytes**.
+
+  - All code must live in the `train_gpt.py` script.
+  - The cap is **decimal 16MB = 16,000,000 bytes** (not 16 MiB = 16,777,216 bytes).
+  - No external downloads, training dataset access, or network calls are allowed during evaluation.
+  - The artifact must be fully self-contained and reproducible.
+</Accordion>
+
+<Accordion title="What is the 0.005-nat improvement requirement?">
+  To claim a new SOTA record on the 10-min 16MB track, your submission must beat the current best score by **at least 0.005 nats** (roughly 0.0072 BPB). Because of inter-run variance, you must provide enough run logs to demonstrate this improvement at `p < 0.01`.
+
+  This requirement is waived for submissions that improve speed through pure systems optimization without changing the ML.
+</Accordion>
+
+## Verification
+
+<Warning>
+  OpenAI does not automatically verify every submission, but **all top leaderboard entries will be verified over time**. Non-reproducible results can be disqualified. If you have trouble reproducing a submission, open an issue on the pull request.
+</Warning>
+
+Verification checks that:
+1. The `train_gpt.py` script compiles and runs from within the record folder
+2. The reported `val_bpb` matches the script output within rounding tolerance
+3. The total artifact size is under 16,000,000 bytes
+4. Wall-clock training time is under 10 minutes on 8xH100 SXM (for official track entries)
+
+## Submit Your Run
+
+Ready to compete? See the [Submission Guide](/submission) for step-by-step instructions on preparing and opening a pull request.
+
+<Tip>
+  Before submitting to the official track, test your script end-to-end on a single H100 first. The 10-minute budget on 8xH100 is stricter than it sounds — use `MAX_WALLCLOCK_SECONDS=600` to enforce the cap locally.
+</Tip>

@@ -1,0 +1,129 @@
+---
+title: "Remote GPU training"
+description: "Scale from local experiments to cloud H100s on Runpod for full leaderboard-eligible runs."
+---
+
+Once you've validated your setup locally, or you want more compute, switch to a remote CUDA machine. Leaderboard submissions must run in under 10 minutes on 8xH100s (SXM variant). This guide walks through launching a pod on Runpod, which OpenAI is partnering with to make setup as easy as possible.
+
+<Warning>
+  An 8xH100 pod costs around $20/hour. Test your changes on cheaper GPU SKUs first and only switch to 8xH100s for final leaderboard submissions.
+</Warning>
+
+## Prerequisites
+
+- A [Runpod account](https://console.runpod.io/deploy) with billing set up
+- An SSH key configured in the Runpod **Settings** tab
+
+## Setup
+
+<Steps>
+  <Step title="Create a Runpod account and add an SSH key">
+    Sign up at [console.runpod.io](https://console.runpod.io/deploy). Go to **Settings** and add your SSH public key so you can connect to pods from your terminal.
+
+    <Tip>
+      If you're new to SSH keys, ask [Codex](https://openai.com/codex/) to walk you through generating and adding one.
+    </Tip>
+  </Step>
+
+  <Step title="Launch a 1xH100 pod using the official template">
+    Deploy using the official Parameter Golf template:
+
+    [Launch template on Runpod](https://console.runpod.io/deploy?template=y5cejece4j&ref=nl2r56th)
+
+    - Select a **1xH100** GPU for initial experiments
+    - Enable **SSH terminal access**
+    - Leave all other settings at their defaults
+    - Click **Deploy**
+
+    All Python dependencies are pre-installed in the image — you don't need to run `pip install`.
+  </Step>
+
+  <Step title="Clone the repository on your remote machine">
+    SSH into your pod once it's running. You'll land in `/workspace/`.
+
+    ```bash
+    cd /workspace
+    git clone https://github.com/openai/parameter-golf.git
+    cd parameter-golf
+    ```
+  </Step>
+
+  <Step title="Download FineWeb training data">
+    Download the cached 1024-token FineWeb export. This defaults to the full validation split plus 80 training shards (8B tokens):
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024
+    ```
+
+    To download a smaller subset while iterating, pass `--train-shards N`:
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 1
+    ```
+  </Step>
+
+  <Step title="Launch your first training run">
+    Run a single-GPU training job. The `nproc_per_node=1` flag matches the one available GPU:
+
+    ```bash
+    RUN_ID=baseline_sp1024 \
+    DATA_PATH=./data/datasets/fineweb10B_sp1024/ \
+    TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
+    VOCAB_SIZE=1024 \
+    torchrun --standalone --nproc_per_node=1 train_gpt.py
+    ```
+
+    For the baseline config, the final `val_bpb` should land around ~1.2 with a compressed model size under 16MB.
+  </Step>
+</Steps>
+
+## Scaling to 8xH100s
+
+To run a full leaderboard-eligible submission, change `nproc_per_node` to match the number of GPUs on your pod:
+
+```bash
+RUN_ID=baseline_sp1024 \
+DATA_PATH=./data/datasets/fineweb10B_sp1024/ \
+TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
+VOCAB_SIZE=1024 \
+torchrun --standalone --nproc_per_node=8 train_gpt.py
+```
+
+<Warning>
+  Only use 8xH100 pods for final leaderboard submissions. At ~$20/hour, iterating on this SKU is expensive. Use 1xH100 or cheaper GPUs for all development.
+</Warning>
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `RUN_ID` | random UUID | Name for this run's log directory |
+| `DATA_PATH` | `./data/datasets/fineweb10B_sp1024` | Path to dataset shards |
+| `TOKENIZER_PATH` | `./data/tokenizers/fineweb_1024_bpe.model` | Path to tokenizer model |
+| `VOCAB_SIZE` | `1024` | Vocabulary size, must match tokenizer |
+| `MAX_WALLCLOCK_SECONDS` | `600` | Hard stop in seconds; set to `0` to disable |
+| `VAL_LOSS_EVERY` | `1000` | Print validation loss every N steps |
+| `TRAIN_LOG_EVERY` | `200` | Print training loss every N steps |
+
+## Understanding the log output
+
+During training, the script prints `train_loss` at every `TRAIN_LOG_EVERY` steps. At the end, it prints:
+
+- `val_loss` — cross-entropy loss on the validation set
+- `val_bpb` — bits per byte, the leaderboard metric
+- `final_int8_zlib_roundtrip` lines — compressed model size in bytes
+
+<Note>
+  By default, `train_gpt.py` enforces a 10-minute wallclock cap (`MAX_WALLCLOCK_SECONDS=600`). To run longer, set `MAX_WALLCLOCK_SECONDS=0` to disable the cap or pass an explicit second count.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Data setup" icon="database" href="/getting-started/data-setup">
+    Download the full 10B token dataset or customize tokenizer variants.
+  </Card>
+  <Card title="Submission requirements" icon="file-check" href="/submission/requirements">
+    Learn what files and logs are required for a valid leaderboard submission.
+  </Card>
+</CardGroup>

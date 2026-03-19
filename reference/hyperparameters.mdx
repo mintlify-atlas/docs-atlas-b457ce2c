@@ -1,0 +1,98 @@
+---
+title: "Hyperparameters"
+description: "Complete reference for all configurable hyperparameters in train_gpt.py, organized by category."
+---
+
+All hyperparameters are set via environment variables and read by the `Hyperparameters` class at startup. The default values reflect the simple baseline configuration: 9 transformer blocks at width 512, 8 attention heads with 4 KV heads (GQA), 2x MLP expansion, vocab size 1024, sequence length 1024, tied embeddings, and a ~10-minute wallclock cap.
+
+## Data Paths
+
+These parameters tell the training script where to find the tokenized dataset shards and the SentencePiece tokenizer model.
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `data_path` | `DATA_PATH` | `./data/datasets/fineweb10B_sp1024` | Root directory for dataset shards. Train and val glob patterns are derived from this path. |
+| `tokenizer_path` | `TOKENIZER_PATH` | `./data/tokenizers/fineweb_1024_bpe.model` | Path to the SentencePiece `.model` file used to compute BPB during validation. Must match `VOCAB_SIZE`. |
+| `run_id` | `RUN_ID` | Random UUID | Identifier for this run. Used as the log filename under `logs/`. |
+| `seed` | `SEED` | `1337` | Global random seed applied to Python, NumPy, and PyTorch RNGs before training begins. |
+
+<Note>
+`train_files` and `val_files` are derived from `data_path` using the glob patterns `fineweb_train_*.bin` and `fineweb_val_*.bin` respectively. They are not independently configurable via environment variables.
+</Note>
+
+## Validation
+
+Validation always runs on the full `fineweb_val_*` split (the fixed first-50k-document set). These parameters control how often validation is computed and how many tokens are processed per validation pass.
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `val_batch_size` | `VAL_BATCH_SIZE` | `524288` | Total token budget across all ranks for each validation batch. Must supply at least one full sequence per rank. |
+| `val_loss_every` | `VAL_LOSS_EVERY` | `1000` | Run validation every N training steps. Set to `0` to skip periodic validation (final eval still runs). |
+| `train_log_every` | `TRAIN_LOG_EVERY` | `200` | Print a training loss log line every N steps. Steps 1–10 are always logged. |
+
+## Training Length
+
+These parameters jointly determine how long training runs. The wallclock cap (`MAX_WALLCLOCK_SECONDS`) takes effect as soon as the elapsed training time exceeds the threshold, triggering an early stop after the current step completes.
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `iterations` | `ITERATIONS` | `20000` | Maximum number of gradient update steps. Training stops when this is reached or the wallclock cap fires, whichever comes first. |
+| `warmdown_iters` | `WARMDOWN_ITERS` | `1200` | Number of steps (or equivalent wallclock time) over which the learning rate linearly decays to zero at the end of training. |
+| `warmup_steps` | `WARMUP_STEPS` | `20` | Number of "warmup" steps that prime the compiled forward/backward/optimizer kernels before actual training. Model and optimizer state are reset after warmup. |
+| `train_batch_tokens` | `TRAIN_BATCH_TOKENS` | `524288` | Total tokens consumed per gradient update across all ranks. Gradient accumulation steps are derived as `8 // world_size`. |
+| `train_seq_len` | `TRAIN_SEQ_LEN` | `1024` | Sequence length used for both training and validation batches. |
+| `max_wallclock_seconds` | `MAX_WALLCLOCK_SECONDS` | `600.0` | Hard cap on training time in seconds. Set to `0` to disable and let `ITERATIONS` alone determine when training ends. |
+| `qk_gain_init` | `QK_GAIN_INIT` | `1.5` | Initial value for the per-head learnable `q_gain` parameter in attention. Scales query vectors before the dot product. |
+
+<Tip>
+For a quick smoke test, override `MAX_WALLCLOCK_SECONDS=60 ITERATIONS=500 VAL_LOSS_EVERY=0` so training exits quickly and only prints the final validation metrics.
+</Tip>
+
+## Model Shape
+
+These parameters define the architecture of the GPT model. Changing them affects both model quality and the number of parameters, which directly impacts the compressed artifact size.
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `vocab_size` | `VOCAB_SIZE` | `1024` | Vocabulary size. Must exactly match the SentencePiece tokenizer's vocab size, or training will raise an error. |
+| `num_layers` | `NUM_LAYERS` | `9` | Total number of transformer blocks. Split evenly into encoder and decoder halves for the U-Net-style skip connections. |
+| `num_kv_heads` | `NUM_KV_HEADS` | `4` | Number of key/value heads for Grouped Query Attention (GQA). Must divide `NUM_HEADS`. |
+| `model_dim` | `MODEL_DIM` | `512` | Hidden dimension (embedding width) of the model. Must be divisible by `NUM_HEADS`. |
+| `num_heads` | `NUM_HEADS` | `8` | Number of query attention heads. Head dimension is `MODEL_DIM // NUM_HEADS`. |
+| `mlp_mult` | `MLP_MULT` | `2` | MLP hidden-layer multiplier. The feedforward hidden size is `MLP_MULT * MODEL_DIM`. Uses a relu² activation. |
+| `tie_embeddings` | `TIE_EMBEDDINGS` | `1` (true) | Whether to tie the input token embedding and the output projection weight. Set to `0` to use a separate `lm_head`. |
+| `rope_base` | `ROPE_BASE` | `10000.0` | Base frequency for Rotary Position Embeddings (RoPE). |
+| `logit_softcap` | `LOGIT_SOFTCAP` | `30.0` | Logit soft-cap value. Logits are passed through `softcap * tanh(logits / softcap)` before the cross-entropy loss. Must be positive. |
+
+<Warning>
+If `TIE_EMBEDDINGS=0`, a separate `lm_head` is initialized with zeros and trained with `HEAD_LR` via Adam. With tied embeddings, the token embedding is trained with `TIED_EMBED_LR` instead of `EMBED_LR`.
+</Warning>
+
+## Optimizer
+
+The training script uses a mixed optimizer strategy:
+- **Token embedding** (and tied `lm_head`): Adam with `TIED_EMBED_LR` or `EMBED_LR`
+- **Untied `lm_head`** (when `TIE_EMBEDDINGS=0`): Adam with `HEAD_LR`
+- **2D matrix parameters** in transformer blocks: Muon with `MATRIX_LR`
+- **Scalars and vectors** in transformer blocks: Adam with `SCALAR_LR`
+
+| Parameter | Env Var | Default | Description |
+|-----------|---------|---------|-------------|
+| `embed_lr` | `EMBED_LR` | `0.6` | Adam learning rate for the token embedding when `TIE_EMBEDDINGS=0`. |
+| `head_lr` | `HEAD_LR` | `0.008` | Adam learning rate for the untied `lm_head` when `TIE_EMBEDDINGS=0`. |
+| `tied_embed_lr` | `TIED_EMBED_LR` | `0.05` | Adam learning rate for the token embedding when `TIE_EMBEDDINGS=1`. |
+| `tied_embed_init_std` | `TIED_EMBED_INIT_STD` | `0.005` | Standard deviation for normal initialization of the tied embedding weight. |
+| `matrix_lr` | `MATRIX_LR` | `0.04` | Muon learning rate for 2D (matrix) parameters in transformer blocks. |
+| `scalar_lr` | `SCALAR_LR` | `0.04` | Adam learning rate for scalar/vector parameters (norms, scales, biases) in transformer blocks. |
+| `muon_momentum` | `MUON_MOMENTUM` | `0.95` | Steady-state momentum for the Muon optimizer. |
+| `muon_backend_steps` | `MUON_BACKEND_STEPS` | `5` | Number of Newton-Schulz iterations used to orthogonalize gradients in Muon. |
+| `muon_momentum_warmup_start` | `MUON_MOMENTUM_WARMUP_START` | `0.85` | Initial Muon momentum value at step 0, linearly warmed up to `MUON_MOMENTUM`. |
+| `muon_momentum_warmup_steps` | `MUON_MOMENTUM_WARMUP_STEPS` | `500` | Number of steps over which Muon momentum is linearly warmed from `MUON_MOMENTUM_WARMUP_START` to `MUON_MOMENTUM`. |
+| `beta1` | `BETA1` | `0.9` | Adam β₁ (first-moment decay). Shared by all Adam optimizer groups. |
+| `beta2` | `BETA2` | `0.95` | Adam β₂ (second-moment decay). Shared by all Adam optimizer groups. |
+| `adam_eps` | `ADAM_EPS` | `1e-8` | Adam numerical stability epsilon. Shared by all Adam optimizer groups. |
+| `grad_clip_norm` | `GRAD_CLIP_NORM` | `0.0` | Global gradient norm clip threshold. Set to `0.0` to disable gradient clipping. |
+
+<Info>
+All learning rates are scaled by the same `lr_mul` schedule factor, which ramps down to zero during warmdown. The `base_lr` for each parameter group stores the unscaled learning rate so the schedule can be applied multiplicatively each step.
+</Info>

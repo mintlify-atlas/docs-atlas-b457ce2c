@@ -1,0 +1,80 @@
+---
+title: "Parameter Golf"
+description: "Train the smallest language model you can that fits in 16MB. Best model wins."
+---
+
+## What is Parameter Golf?
+
+**OpenAI Model Craft Challenge: Parameter Golf** is a competitive ML challenge to train the best language model that fits within a **16MB artifact** and trains in **under 10 minutes on 8xH100 GPUs**, evaluated by compression on the FineWeb validation set (tokenizer-agnostic bits per byte).
+
+The challenge pushes participants toward creative solutions: novel architectures, aggressive compression schemes, and unconventional training strategies — all within a tight parameter budget.
+
+<CardGroup cols={2}>
+  <Card title="Local Training" icon="laptop" href="/getting-started/local-training">
+    Start iterating on your Mac with Apple Silicon using the MLX training script
+  </Card>
+  <Card title="Remote GPU" icon="server" href="/getting-started/remote-gpu">
+    Scale up to cloud GPUs on Runpod for full 8xH100 training runs
+  </Card>
+  <Card title="Scoring & Evaluation" icon="chart-bar" href="/concepts/scoring">
+    Understand the bits-per-byte metric and how submissions are ranked
+  </Card>
+  <Card title="Submission Guide" icon="trophy" href="/submission/requirements">
+    Learn what you need to submit a valid SOTA record
+  </Card>
+</CardGroup>
+
+## Challenge Rules at a Glance
+
+<CardGroup cols={3}>
+  <Card title="16MB Limit" icon="database">
+    Code bytes + compressed model bytes must total under 16,000,000 bytes (decimal, not MiB)
+  </Card>
+  <Card title="10-Minute Cap" icon="clock">
+    Leaderboard submissions must train in under 10 minutes on 8xH100 SXM GPUs
+  </Card>
+  <Card title="BPB Metric" icon="compress">
+    Scored on bits-per-byte compression of the FineWeb validation set — tokenizer-agnostic
+  </Card>
+</CardGroup>
+
+## Current Baseline
+
+The naive baseline achieves **1.2244 BPB** using a 9-layer, 512-dim transformer with a 1024-token vocabulary, grouped query attention (4 KV heads), and tied embeddings — all fitting within a 15.9MB compressed artifact.
+
+<Note>
+OpenAI is sponsoring **$1,000,000 in compute credits** to help participants get started. [Request a compute grant](https://openai.com/index/parameter-golf/#credit-form) to access sponsored GPU time.
+</Note>
+
+## What Makes This Interesting
+
+If you're familiar with [neural scaling laws](https://arxiv.org/abs/2001.08361), this challenge optimizes **L(N)** — the lowest loss achievable at a fixed parameter count N, unconstrained by data, compute, steps, or architecture.
+
+This is deliberately different from:
+- **[NanoGPT Speedrun](https://github.com/KellerJordan/modded-nanogpt)** — optimizes L(T): lowest time to reach a fixed loss target
+- **[NanoGPT Slowrun](https://github.com/qlabs-eng/slowrun)** — optimizes L(D): lowest loss given a constrained dataset size
+
+The 16MB constraint encourages exploration of approaches like:
+- Test-time compute and inference-time scaling
+- Aggressive parameter tying and depth recurrence
+- Low-rank training and quantization-aware training
+- Novel tokenizers and non-standard vocabularies
+- Megakernels and custom CUDA operations
+
+## Challenge Timeline
+
+The challenge runs from **March 18th to April 30th, 2026**.
+
+## Community
+
+Join the [OpenAI Discord server](https://discord.com/invite/openai) and visit the Parameter Golf channels:
+- `#parameter-golf-discussions` — strategy and technique discussion
+- `#parameter-golf-announcements` — official updates
+
+## Careers at OpenAI
+
+<Info>
+Many researchers at OpenAI first distinguished themselves through elite mathematics and programming competitions. The Model Craft Challenge is designed in that spirit — testing the ability to tackle unfamiliar problems with creativity and rigor.
+
+In June, OpenAI plans to hire a small cohort of early-career researchers. For exceptional participants, the challenge may serve as a way to stand out to OpenAI researchers and recruiters. [Introduce yourself via the participant form](https://jobs.ashbyhq.com/openai/form/open-ai-challenge-parameter-golf).
+</Info>

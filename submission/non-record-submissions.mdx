@@ -1,0 +1,101 @@
+---
+title: "Non-Record Submissions"
+description: "How to submit creative, experimental, or unlimited-compute approaches that don't claim a new SOTA record."
+---
+
+Not every great submission needs to beat the leaderboard. Non-record submissions are open to unique and interesting approaches that satisfy the 16 MB artifact limit but don't claim a new SOTA. OpenAI still maintains a high bar: justify your ideas and results in detail when submitting.
+
+## What qualifies
+
+Non-record submissions are appropriate for any of the following:
+
+<CardGroup cols={2}>
+  <Card title="Interesting approaches" icon="lightbulb">
+    Unusual or out-of-the-box architectures and techniques that don't yet beat SOTA but explore genuinely new territory.
+  </Card>
+  <Card title="In-progress solutions" icon="wrench">
+    Unoptimized or partially complete implementations that run successfully and demonstrate a real idea worth sharing.
+  </Card>
+  <Card title="Negative results" icon="circle-x">
+    Experiments that didn't improve the score but produced clear learnings. Interesting negative results are valuable and welcome.
+  </Card>
+  <Card title="Unlimited compute" icon="server">
+    Runs that exceed the 10-minute compute limit. These go into a separate unlimited-compute track while still adhering to the 16 MB artifact cap.
+  </Card>
+</CardGroup>
+
+## Ideas worth exploring
+
+The challenge is designed to push participants toward creative solutions. Some directions that may be especially interesting in the parameter-constrained regime:
+
+- **Test-time compute / inference-time scaling** — spend more FLOP at inference rather than training
+- **Depth recurrence and parameter tying** — reuse layers to pack more effective depth into the byte budget
+- **Novel tokenizers with non-standard vocabularies** — the baseline uses a 1024-token vocabulary; smaller or larger vocabularies may compress differently
+- **Quantization-aware training (QAT)** — train directly in low precision to reduce the gap between pre-quant and post-quant scores
+- **Long context approaches** — use longer sequence lengths during training or evaluation
+- **Megakernels / custom CUDA ops** — fused or specialized kernels that change what is practical within the time budget
+
+<Tip>
+  The spirit of non-record submissions is creative exploration. You are encouraged to push the infinite frontier of parameter-limited performance, even if your run doesn't fit the 10-minute constraint.
+</Tip>
+
+## Submission format
+
+Non-record submissions follow the same format as record submissions. Your PR folder must include:
+
+1. `README.md` — explains the submission in reasonable detail
+2. `submission.json` — includes your name, GitHub ID, `val_bpb`, and metadata
+3. `train.log` — exact log produced by the training script
+4. `train_gpt.py` — the training script, which must compile and run from within the records folder
+
+See [Submission Requirements](/submission/requirements) for the full file specifications and `submission.json` format.
+
+## Folder location
+
+Non-record submissions go under `/records/track_non_record_16mb/` with a date-prefixed folder name:
+
+```
+records/
+└── track_non_record_16mb/
+    └── 2026-03-18_Quasi10Bfrom50B_SP1024_9x512_KV4_4h_pgut3/
+        ├── README.md
+        ├── submission.json
+        ├── train.log
+        └── train_gpt.py
+```
+
+The 4-hour baseline example — the same baseline architecture trained for 4 hours instead of 10 minutes — reached `val_bpb: 1.2074` (vs. `1.2244` for the 10-minute record), demonstrating the gains available from more compute even with the same architecture:
+
+```json
+{
+  "author": "Will DePue",
+  "github_id": "williamd",
+  "name": "4-Hour Quasi-10B SP1024",
+  "track": "non-record-unlimited-compute-16mb",
+  "val_bpb": 1.20737944,
+  "pre_quant_val_bpb": 1.1749,
+  "bytes_total": 15810161,
+  "bytes_code": 47642
+}
+```
+
+## Unlimited compute track
+
+Runs that exceed the 10-minute wall-clock limit can still be submitted to the non-record track. Note your compute usage explicitly in the README:
+
+```bash
+# To disable the wall-clock cap entirely:
+MAX_WALLCLOCK_SECONDS=0
+```
+
+<Note>
+  When submitting an unlimited-compute run, note `MAX_WALLCLOCK_SECONDS=0` (or the actual limit you used) in your README so reviewers understand the compute budget. The artifact size limit of 16,000,000 bytes still applies.
+</Note>
+
+## PRs on core code
+
+The `train_gpt.py` and `train_gpt_mlx.py` scripts are intended as good starting points for new participants, not SOTA configs. PRs directly against these scripts are accepted if they tune, improve, or simplify the code without significantly increasing complexity.
+
+<Info>
+  Improvements to the core training scripts should remain general-purpose launch points. Any best-performing model configs should be kept in the `/records/` folder rather than baked into the root scripts.
+</Info>

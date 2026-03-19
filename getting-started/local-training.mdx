@@ -1,0 +1,95 @@
+---
+title: "Local training (Apple Silicon)"
+description: "Run your first parameter golf training job on a Mac with Apple Silicon using MLX."
+---
+
+If you have a Mac with Apple Silicon, the MLX training script lets you iterate locally before scaling to cloud GPUs. This is a good way to validate your setup and experiment with small runs cheaply.
+
+<Info>
+  If you don't have a Mac with Apple Silicon, you can ask [Codex](https://openai.com/codex/) to refactor `train_gpt_mlx.py` to remove the MLX dependency. It may still be slow, so jumping straight to [remote GPU training](/getting-started/remote-gpu) is also a good option.
+</Info>
+
+## Prerequisites
+
+- Mac with Apple Silicon (M1 or later)
+- Python 3.10+
+- Git
+
+## Setup
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/openai/parameter-golf.git
+    cd parameter-golf
+    ```
+  </Step>
+
+  <Step title="Create a virtual environment and install dependencies">
+    Create a fresh Python environment and install the packages needed for the MLX path and dataset download:
+
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install --upgrade pip
+    pip install mlx numpy sentencepiece huggingface-hub datasets tqdm
+    ```
+  </Step>
+
+  <Step title="Download FineWeb training data">
+    Download the cached FineWeb export using the 1024-token SentencePiece vocabulary. For a quick smoke test, start with 10 shards:
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 10
+    ```
+
+    This populates `./data/datasets/fineweb10B_sp1024/` and `./data/tokenizers/`. See [Data setup](/getting-started/data-setup) for full download options.
+  </Step>
+
+  <Step title="Run your first training job">
+    Launch a small 200-iteration smoke run:
+
+    ```bash
+    RUN_ID=mlx_smoke \
+    ITERATIONS=200 \
+    TRAIN_BATCH_TOKENS=8192 \
+    VAL_LOSS_EVERY=0 \
+    VAL_BATCH_SIZE=8192 \
+    python3 train_gpt_mlx.py
+    ```
+  </Step>
+</Steps>
+
+## Understanding the output
+
+Setting `VAL_LOSS_EVERY=0` skips periodic validation during training. The script prints `val_loss` and `val_bpb` once at the very end, after training completes.
+
+Validation always runs on the full `fineweb_val_*` split — the fixed first-50,000-document set. This is the same set used for leaderboard scoring, so local `val_bpb` numbers are directly comparable.
+
+## Key environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `RUN_ID` | random UUID | Name for this run's log directory |
+| `ITERATIONS` | `20000` | Number of training steps |
+| `TRAIN_BATCH_TOKENS` | `524288` | Tokens per training step |
+| `VAL_LOSS_EVERY` | `0` | Validate every N steps; `0` = end only |
+| `VAL_BATCH_SIZE` | `524288` | Tokens per validation pass |
+| `MAX_WALLCLOCK_SECONDS` | `600` | Hard stop after this many seconds |
+| `DATA_PATH` | `./data/datasets/fineweb10B_sp1024` | Path to dataset shards |
+| `TOKENIZER_PATH` | `./data/tokenizers/fineweb_1024_bpe.model` | Path to tokenizer model |
+
+<Tip>
+  For faster iteration on Apple Silicon, reduce `TRAIN_BATCH_TOKENS` and `VAL_BATCH_SIZE` to `8192` as shown in the smoke command above. This makes each step much faster at the cost of noisier gradient estimates.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Remote GPU training" icon="server" href="/getting-started/remote-gpu">
+    Scale up to cloud H100s via Runpod for full leaderboard runs.
+  </Card>
+  <Card title="Data setup" icon="database" href="/getting-started/data-setup">
+    Download the full 10B token dataset or configure custom tokenizer variants.
+  </Card>
+</CardGroup>

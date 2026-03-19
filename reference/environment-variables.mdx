@@ -1,0 +1,241 @@
+---
+title: "Environment Variables"
+description: "Complete reference for all environment variables used to configure training, quantization, distributed setup, and data pipeline."
+---
+
+All configuration in `train_gpt.py` is driven by environment variables. This page is a consolidated reference organized by subsystem.
+
+## Quick-Start Example
+
+```bash
+RUN_ID=my_experiment \
+DATA_PATH=./data/datasets/fineweb10B_sp1024/ \
+TOKENIZER_PATH=./data/tokenizers/fineweb_1024_bpe.model \
+VOCAB_SIZE=1024 \
+NUM_LAYERS=12 \
+MODEL_DIM=512 \
+MAX_WALLCLOCK_SECONDS=600 \
+torchrun --standalone --nproc_per_node=8 train_gpt.py
+```
+
+## Training Hyperparameters
+
+All variables in this section are read by the `Hyperparameters` class at process startup. Unset variables fall back to the listed defaults.
+
+### Data Paths
+
+<ParamField query="DATA_PATH" type="string" default="./data/datasets/fineweb10B_sp1024">
+  Root directory for tokenized dataset shards. Train and val glob patterns (`fineweb_train_*.bin` and `fineweb_val_*.bin`) are derived from this path.
+</ParamField>
+
+<ParamField query="TOKENIZER_PATH" type="string" default="./data/tokenizers/fineweb_1024_bpe.model">
+  Path to the SentencePiece `.model` file. Used to build look-up tables for the tokenizer-agnostic BPB metric. Must match `VOCAB_SIZE` exactly or training raises an error.
+</ParamField>
+
+<ParamField query="RUN_ID" type="string" default="random UUID">
+  Human-readable identifier for this run. Determines the log filename at `logs/<RUN_ID>.txt`.
+</ParamField>
+
+<ParamField query="SEED" type="integer" default="1337">
+  Global random seed applied to Python, NumPy, and PyTorch (including `cuda.manual_seed_all`) before training.
+</ParamField>
+
+### Validation
+
+<ParamField query="VAL_BATCH_SIZE" type="integer" default="524288">
+  Total token budget across all ranks per validation pass. Must provide at least one full `TRAIN_SEQ_LEN`-length sequence per rank.
+</ParamField>
+
+<ParamField query="VAL_LOSS_EVERY" type="integer" default="1000">
+  Run validation every N training steps. Set to `0` to disable periodic validation (final evaluation still runs at the end).
+</ParamField>
+
+<ParamField query="TRAIN_LOG_EVERY" type="integer" default="200">
+  Log a `train_loss` line every N steps. Steps 1–10 are always logged regardless of this setting.
+</ParamField>
+
+### Training Length
+
+<ParamField query="ITERATIONS" type="integer" default="20000">
+  Maximum number of gradient update steps before training stops. The wallclock cap may cause an earlier stop.
+</ParamField>
+
+<ParamField query="WARMDOWN_ITERS" type="integer" default="1200">
+  Number of steps (or equivalent wallclock duration) over which the learning rate linearly decays to zero at training end.
+</ParamField>
+
+<ParamField query="WARMUP_STEPS" type="integer" default="20">
+  Number of pre-training "warmup" steps that prime compiled kernels. Model and optimizer state are fully reset after warmup completes, so effective training always starts from the true initialization.
+</ParamField>
+
+<ParamField query="TRAIN_BATCH_TOKENS" type="integer" default="524288">
+  Total tokens consumed per gradient update across all ranks. Gradient accumulation steps = `8 // WORLD_SIZE`.
+</ParamField>
+
+<ParamField query="TRAIN_SEQ_LEN" type="integer" default="1024">
+  Sequence length for both training and validation. Affects memory usage and the minimum `VAL_BATCH_SIZE`.
+</ParamField>
+
+<ParamField query="MAX_WALLCLOCK_SECONDS" type="float" default="600.0">
+  Hard cap on training time in seconds. When elapsed training time reaches this limit, training stops after the current step finishes. Set to `0` to disable the cap.
+</ParamField>
+
+<ParamField query="QK_GAIN_INIT" type="float" default="1.5">
+  Initial value for the per-head learnable `q_gain` parameter in each attention block. Scales query vectors before the dot product.
+</ParamField>
+
+### Model Shape
+
+<ParamField query="VOCAB_SIZE" type="integer" default="1024">
+  Vocabulary size. Must exactly match the SentencePiece tokenizer's vocab size.
+</ParamField>
+
+<ParamField query="NUM_LAYERS" type="integer" default="9">
+  Total number of transformer blocks. Split evenly into encoder and decoder halves for U-Net-style skip connections.
+</ParamField>
+
+<ParamField query="NUM_KV_HEADS" type="integer" default="4">
+  Number of key/value heads for Grouped Query Attention (GQA). Must evenly divide `NUM_HEADS`.
+</ParamField>
+
+<ParamField query="MODEL_DIM" type="integer" default="512">
+  Hidden/embedding dimension. Must be divisible by `NUM_HEADS`, and `MODEL_DIM // NUM_HEADS` must be even (required for RoPE).
+</ParamField>
+
+<ParamField query="NUM_HEADS" type="integer" default="8">
+  Number of query attention heads.
+</ParamField>
+
+<ParamField query="MLP_MULT" type="integer" default="2">
+  MLP hidden-layer multiplier. The feedforward hidden size is `MLP_MULT * MODEL_DIM`.
+</ParamField>
+
+<ParamField query="TIE_EMBEDDINGS" type="integer" default="1">
+  Set to `1` to tie input embedding and output projection weights (saves parameters). Set to `0` for a separate `lm_head`.
+</ParamField>
+
+<ParamField query="ROPE_BASE" type="float" default="10000.0">
+  Base frequency for Rotary Position Embeddings.
+</ParamField>
+
+<ParamField query="LOGIT_SOFTCAP" type="float" default="30.0">
+  Logit soft-cap. Applied as `softcap * tanh(logits / softcap)` before cross-entropy. Must be positive.
+</ParamField>
+
+### Optimizer
+
+<ParamField query="EMBED_LR" type="float" default="0.6">
+  Adam learning rate for the token embedding when `TIE_EMBEDDINGS=0`.
+</ParamField>
+
+<ParamField query="HEAD_LR" type="float" default="0.008">
+  Adam learning rate for the untied `lm_head` when `TIE_EMBEDDINGS=0`.
+</ParamField>
+
+<ParamField query="TIED_EMBED_LR" type="float" default="0.05">
+  Adam learning rate for the token embedding when `TIE_EMBEDDINGS=1`.
+</ParamField>
+
+<ParamField query="TIED_EMBED_INIT_STD" type="float" default="0.005">
+  Standard deviation for normal initialization of the tied embedding weight.
+</ParamField>
+
+<ParamField query="MATRIX_LR" type="float" default="0.04">
+  Muon learning rate for 2D matrix parameters in transformer blocks.
+</ParamField>
+
+<ParamField query="SCALAR_LR" type="float" default="0.04">
+  Adam learning rate for scalar and vector parameters (scales, norms, gains) in transformer blocks.
+</ParamField>
+
+<ParamField query="MUON_MOMENTUM" type="float" default="0.95">
+  Steady-state momentum for the Muon optimizer.
+</ParamField>
+
+<ParamField query="MUON_BACKEND_STEPS" type="integer" default="5">
+  Number of Newton-Schulz iterations used to orthogonalize gradient matrices in Muon.
+</ParamField>
+
+<ParamField query="MUON_MOMENTUM_WARMUP_START" type="float" default="0.85">
+  Starting Muon momentum value at step 0, linearly warmed up to `MUON_MOMENTUM` over `MUON_MOMENTUM_WARMUP_STEPS` steps.
+</ParamField>
+
+<ParamField query="MUON_MOMENTUM_WARMUP_STEPS" type="integer" default="500">
+  Steps over which Muon momentum is linearly warmed from `MUON_MOMENTUM_WARMUP_START` to `MUON_MOMENTUM`.
+</ParamField>
+
+<ParamField query="BETA1" type="float" default="0.9">
+  Adam β₁ (first-moment decay). Applies to all Adam optimizer groups.
+</ParamField>
+
+<ParamField query="BETA2" type="float" default="0.95">
+  Adam β₂ (second-moment decay). Applies to all Adam optimizer groups.
+</ParamField>
+
+<ParamField query="ADAM_EPS" type="float" default="1e-8">
+  Adam numerical stability epsilon. Applies to all Adam optimizer groups.
+</ParamField>
+
+<ParamField query="GRAD_CLIP_NORM" type="float" default="0.0">
+  Global gradient norm clip threshold. Set to `0.0` to disable gradient clipping.
+</ParamField>
+
+## Quantization
+
+These variables control which tensors are kept in floating-point during int8 post-training quantization.
+
+<ParamField query="CONTROL_TENSOR_NAME_PATTERNS" type="string" default="attn_scale,attn_scales,mlp_scale,mlp_scales,resid_mix,resid_mixes,q_gain,skip_weight,skip_weights">
+  Comma-separated list of name substrings. Any parameter whose name contains one of these patterns is treated as a "control tensor" — kept in fp32 during training and excluded from int8 quantization. These are typically low-dimensional scalar/vector parameters that are sensitive to precision loss.
+</ParamField>
+
+<ParamField query="INT8_KEEP_FLOAT_FP32_NAME_PATTERNS" type="string" default="same as CONTROL_TENSOR_NAME_PATTERNS">
+  Comma-separated list of name substrings. Tensors matching these patterns are kept in full fp32 in the quantized artifact rather than being downcast to fp16. Defaults to the same value as `CONTROL_TENSOR_NAME_PATTERNS`.
+</ParamField>
+
+<Note>
+Tensors with 65,536 elements or fewer are always kept as floating-point (stored as fp16) rather than quantized to int8, regardless of these patterns. Large 2D float tensors use per-row int8 quantization; other large float tensors use per-tensor int8 quantization.
+</Note>
+
+## Distributed Training
+
+These variables are set automatically by `torchrun`. You do not need to set them manually.
+
+<ParamField query="RANK" type="integer">
+  Global rank of the current process across all nodes. Process 0 is the master process that writes logs and saves checkpoints.
+</ParamField>
+
+<ParamField query="WORLD_SIZE" type="integer">
+  Total number of processes in the distributed job. Must divide 8 so that gradient accumulation steps (`8 // WORLD_SIZE`) remain an integer. Valid values: 1, 2, 4, 8.
+</ParamField>
+
+<ParamField query="LOCAL_RANK" type="integer">
+  Rank of the current process on its local node. Used to select the CUDA device (`cuda:<LOCAL_RANK>`).
+</ParamField>
+
+## Data Pipeline
+
+These variables configure the dataset download and tokenization scripts in `data/`.
+
+<ParamField query="MATCHED_FINEWEB_REPO_ID" type="string" default="willdepueoai/parameter-golf">
+  Hugging Face dataset repository ID to download shards and tokenizers from.
+</ParamField>
+
+<ParamField query="MATCHED_FINEWEB_REMOTE_ROOT_PREFIX" type="string" default="datasets">
+  Subdirectory prefix within the HF repo under which dataset shards and manifest are stored.
+</ParamField>
+
+<ParamField query="MATCHED_FINEWEB_SP_BATCH_SIZE" type="integer">
+  Batch size for SentencePiece tokenizer encoding during shard export. Useful for tuning CPU-heavy export throughput.
+</ParamField>
+
+<ParamField query="MATCHED_FINEWEB_TOKENIZER_THREADS" type="integer">
+  Number of threads for the tokenizer encoding pool during shard export.
+</ParamField>
+
+<ParamField query="MATCHED_FINEWEB_TIKTOKEN_THREADS" type="integer">
+  Number of threads for tiktoken encoding during shard export (used when tokenizing with the tiktoken backend).
+</ParamField>
+
+<ParamField query="MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE" type="integer">
+  Batch size for GPT-2 decoding during the blobstore docs-cache path. Useful for tuning memory vs. throughput tradeoff.
+</ParamField>

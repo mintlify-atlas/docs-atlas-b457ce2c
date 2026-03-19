@@ -1,0 +1,146 @@
+---
+title: "Tokenizer & Vocabulary"
+description: "How the challenge supports custom tokenizers, how bytes-per-token is counted for BPB, and the tradeoffs of different vocabulary sizes."
+---
+
+Unlike most LLM benchmarks, Parameter Golf does not lock the tokenizer. You can bring any SentencePiece vocabulary — the bits-per-byte metric normalises scores across different tokenization strategies, so a 256-token byte-level tokenizer and a 32 000-token BPE tokenizer are directly comparable.
+
+## Baseline tokenizer
+
+The default tokenizer is a SentencePiece BPE model with a **1024-token vocabulary** trained on FineWeb:
+
+```
+./data/tokenizers/fineweb_1024_bpe.model
+```
+
+This is configured via the `TOKENIZER_PATH` environment variable in `Hyperparameters`:
+
+```python
+tokenizer_path = os.environ.get(
+    "TOKENIZER_PATH",
+    "./data/tokenizers/fineweb_1024_bpe.model"
+)
+```
+
+The `VOCAB_SIZE` environment variable must match the tokenizer's vocabulary size exactly:
+
+```python
+sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
+if int(sp.vocab_size()) != args.vocab_size:
+    raise ValueError(
+        f"VOCAB_SIZE={args.vocab_size} does not match tokenizer vocab_size={int(sp.vocab_size())}"
+    )
+```
+
+## Why BPB enables tokenizer-agnostic comparison
+
+Token-level cross-entropy loss is not comparable across tokenizers with different vocabulary sizes:
+
+- A byte-level tokenizer (vocab=256) has ~4 tokens per English word. Each token must carry 1 byte of information.
+- A subword tokenizer (vocab=32 000) has ~1.3 tokens per English word. Each token must carry ~2.5 bytes of information.
+
+Comparing raw loss in nats would be meaningless. BPB corrects for this by multiplying loss (in bits/token) by the tokenizer's tokens-per-byte ratio:
+
+```
+BPB = (val_loss / log(2)) * (tokens / bytes)
+```
+
+This yields bits consumed per byte of source text — a quantity that is meaningful regardless of how the text was tokenized.
+
+## `build_sentencepiece_luts()`
+
+To count bytes at validation time without decoding every token, the script precomputes three lookup tables over the full vocabulary:
+
+```python
+def build_sentencepiece_luts(
+    sp: spm.SentencePieceProcessor, vocab_size: int, device: torch.device
+) -> tuple[Tensor, Tensor, Tensor]:
+    sp_vocab_size = int(sp.vocab_size())
+    table_size = max(sp_vocab_size, vocab_size)
+    base_bytes_np = np.zeros((table_size,), dtype=np.int16)
+    has_leading_space_np = np.zeros((table_size,), dtype=np.bool_)
+    is_boundary_token_np = np.ones((table_size,), dtype=np.bool_)
+    for token_id in range(sp_vocab_size):
+        if sp.is_control(token_id) or sp.is_unknown(token_id) or sp.is_unused(token_id):
+            continue
+        is_boundary_token_np[token_id] = False
+        if sp.is_byte(token_id):
+            base_bytes_np[token_id] = 1
+            continue
+        piece = sp.id_to_piece(token_id)
+        if piece.startswith("▁"):
+            has_leading_space_np[token_id] = True
+            piece = piece[1:]
+        base_bytes_np[token_id] = len(piece.encode("utf-8"))
+    return (
+        torch.tensor(base_bytes_np, dtype=torch.int16, device=device),
+        torch.tensor(has_leading_space_np, dtype=torch.bool, device=device),
+        torch.tensor(is_boundary_token_np, dtype=torch.bool, device=device),
+    )
+```
+
+### Lookup table descriptions
+
+<AccordionGroup>
+  <Accordion title="base_bytes_lut — byte count per token ID">
+    For each token ID, stores the number of UTF-8 bytes in the token's surface form, *excluding* any leading `▁` space. Byte tokens are counted as 1. Control, unknown, and unused tokens are left as 0.
+  </Accordion>
+
+  <Accordion title="has_leading_space_lut — whether token has a ▁ prefix">
+    SentencePiece encodes word-initial spaces as a `▁` prefix on the following token. This table records which token IDs carry such a prefix. The space is counted as 1 extra byte, but only when the preceding token is not a boundary token.
+  </Accordion>
+
+  <Accordion title="is_boundary_token_lut — control/unknown/unused tokens">
+    All token IDs are initialised as boundary tokens (`True`). Normal tokens are set to `False` during the loop. This is used to suppress the leading-space correction when the preceding context token is a special/control token:
+
+    ```python
+    token_bytes += (
+        has_leading_space_lut[tgt_ids]
+        & ~is_boundary_token_lut[prev_ids]
+    ).to(dtype=torch.int16)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Leading space correction detail
+
+SentencePiece absorbs the space before a word into the token that begins the word (e.g., `" hello"` becomes `▁hello`). When counting bytes:
+
+1. `base_bytes_np[token_id]` counts `len("hello".encode("utf-8")) = 5`
+2. `has_leading_space_lut[token_id]` is `True`, so one extra byte is added — *unless* the previous token is a boundary token (e.g., start-of-sequence)
+
+This correctly accounts for the space in the original text without double-counting at document boundaries.
+
+## Vocabulary size tradeoffs
+
+<CardGroup cols={2}>
+  <Card title="Small vocabulary" icon="minus-circle">
+    More tokens per byte → lower tokens-per-byte ratio → BPB penalty is smaller (each token must compress less). But the embedding table is cheaper: fewer rows mean more parameter budget for the model body.
+  </Card>
+  <Card title="Large vocabulary" icon="plus-circle">
+    Fewer tokens per byte → each token must carry more semantic signal. The embedding table consumes a larger fraction of the 16 MB budget, leaving less room for transformer weight matrices.
+  </Card>
+</CardGroup>
+
+The optimal vocabulary size is a real design tradeoff in this challenge. A 1024-token vocabulary is unusually small by modern standards, but it leaves the majority of the 16 MB budget for transformer weights rather than embedding tables.
+
+<Tip>
+A vocabulary of size `V` with model dimension `D` and tied embeddings uses `V × D × 2` bytes in bf16. At V=1024, D=512: 1,048,576 bytes (1 MB). At V=32000, D=512: 32,768,000 bytes — already over 16 MB on its own.
+</Tip>
+
+## Bringing a custom tokenizer
+
+You can retokenize FineWeb with any SentencePiece vocabulary using the data export pipeline described in `data/README.md`. Once you have retokenized shards:
+
+```bash
+TOKENIZER_PATH=./data/tokenizers/my_vocab.model \
+VOCAB_SIZE=4096 \
+DATA_PATH=./data/datasets/fineweb10B_my_vocab \
+torchrun --standalone --nproc_per_node=8 train_gpt.py
+```
+
+The script validates that `VOCAB_SIZE` matches `sp.vocab_size()` at startup and will raise an error if they differ.
+
+<Warning>
+Submissions that modify the tokenizer are scrutinised more carefully during verification. A bug in the `build_sentencepiece_luts()` logic or in the byte-counting tables can cause `val_bpb` to appear artificially low, which would constitute an invalid submission.
+</Warning>

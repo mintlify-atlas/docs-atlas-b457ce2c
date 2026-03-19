@@ -1,0 +1,193 @@
+---
+title: "Data Pipeline"
+description: "How FineWeb training and validation data is downloaded, tokenized, stored, and streamed during training."
+---
+
+## Overview
+
+The challenge uses a preprocessed snapshot of [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb), a large-scale English web text dataset curated by Hugging Face. The preprocessing pipeline tokenizes a fixed, shuffled subset of FineWeb documents and exports the result as binary shard files ready for direct streaming by the training script.
+
+The default published dataset is hosted at **`willdepueoai/parameter-golf`** on Hugging Face as a dataset repository. It includes tokenizer files and all shard files under a `datasets/` subdirectory.
+
+<CardGroup cols={2}>
+  <Card title="Default variant" icon="database">
+    `sp1024` — SentencePiece BPE with vocabulary size 1024
+  </Card>
+  <Card title="Shard size" icon="layers">
+    100,000,000 tokens per shard (~200 MB each)
+  </Card>
+  <Card title="Training shards" icon="circle-play">
+    Up to 180 shards available; default download is 80 (8B tokens)
+  </Card>
+  <Card title="Validation split" icon="chart-line">
+    Fixed first-50k-document set, always downloaded in full
+  </Card>
+</CardGroup>
+
+## Shard File Format
+
+Each `.bin` shard file follows a fixed binary layout:
+
+```
+[256 × int32 header][uint16 token IDs ...]
+```
+
+The 256-element header (little-endian int32) contains:
+
+| Index | Field | Value |
+|-------|-------|-------|
+| 0 | Magic number | `20240520` |
+| 1 | Version | `1` |
+| 2 | `num_tokens` | Token count in this shard |
+| 3–255 | Reserved | (unused) |
+
+Token IDs are stored as little-endian `uint16`. The file size is exactly `256 * 4 + num_tokens * 2` bytes. The `load_data_shard()` function validates both the header magic/version and the file size before reading.
+
+```python
+# From train_gpt.py — shard validation and loading
+def load_data_shard(file: Path) -> Tensor:
+    header_bytes = 256 * np.dtype("<i4").itemsize   # 1024 bytes
+    header = np.fromfile(file, dtype="<i4", count=256)
+    if header.size != 256 or int(header[0]) != 20240520 or int(header[1]) != 1:
+        raise ValueError(f"Unexpected shard header for {file}")
+    num_tokens = int(header[2])
+    expected_size = header_bytes + num_tokens * 2
+    if file.stat().st_size != expected_size:
+        raise ValueError(f"Shard size mismatch for {file}")
+    tokens_np = np.fromfile(file, dtype="<u2", count=num_tokens, offset=header_bytes)
+    return torch.from_numpy(tokens_np.astype(np.uint16, copy=False))
+```
+
+## Validation Split
+
+Validation shards follow the naming pattern `fineweb_val_*.bin`. They represent the **fixed first-50,000-document set** from the frozen shuffled FineWeb export and are always downloaded in full by `cached_challenge_fineweb.py`.
+
+During training, `load_validation_tokens()` concatenates all val shards into a single token tensor and truncates it to a multiple of `TRAIN_SEQ_LEN`. Evaluation uses this fixed corpus to compute both `val_loss` (cross-entropy in nats) and `val_bpb` (bits per byte, tokenizer-agnostic).
+
+<Warning>
+Do not modify or replace the validation shards. The challenge score is computed against this fixed corpus. Any submission that changes the val split will be disqualified.
+</Warning>
+
+## Training Shards
+
+Training shards follow the naming pattern `fineweb_train_*.bin`. Training on the first N shards means training on the prefix of the same frozen shuffled export, keeping data order aligned with the baseline for each tokenizer family.
+
+The manifest file (`data/manifest.json`) records how many shards exist for each variant. The downloader enforces the shard count limit — requesting more shards than are published raises an error.
+
+## Downloading Published Data
+
+Use `data/cached_challenge_fineweb.py` to download tokenized shards. The script is manifest-driven: it reads `manifest.json` from the HF repo to discover available shards and tokenizer artifacts for the requested variant.
+
+### Download commands
+
+```bash
+# Default: full validation split + 80 training shards (8B tokens)
+python3 data/cached_challenge_fineweb.py --variant sp1024
+
+# Minimal local smoke test (1 training shard)
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 1
+
+# Full 10B training tokens (100 shards)
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
+
+# All available shards (up to 180)
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 180
+```
+
+Downloaded files are placed at:
+- `data/datasets/fineweb10B_sp1024/fineweb_train_*.bin`
+- `data/datasets/fineweb10B_sp1024/fineweb_val_*.bin`
+- `data/tokenizers/fineweb_1024_bpe.model`
+
+### Using a custom dataset repository
+
+You can point the downloader at your own Hugging Face dataset repo:
+
+```bash
+MATCHED_FINEWEB_REPO_ID=your-hf-username/your-dataset-repo \
+MATCHED_FINEWEB_REMOTE_ROOT_PREFIX=your_50B_export_root \
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
+```
+
+### Also downloading the source documents
+
+Pass `--with-docs` to also download `docs_selected.jsonl` and its sidecar manifest, which are needed for retokenizing with a custom tokenizer:
+
+```bash
+python3 data/cached_challenge_fineweb.py --variant sp1024 --with-docs
+```
+
+## Tokenizer Specs
+
+The default tokenizer is a SentencePiece BPE model with vocabulary size 1024. Tokenizer metadata is tracked in `data/tokenizer_specs.json`:
+
+```json
+{
+  "tokenizers": [
+    {
+      "name": "sp_bpe_1024",
+      "dataset_suffix": "sp1024",
+      "vocab_size": 1024
+    }
+  ]
+}
+```
+
+The `dataset_suffix` field (`sp1024`) maps to the dataset directory name (`fineweb10B_sp1024`) and the `--variant` argument accepted by `cached_challenge_fineweb.py`.
+
+## Rebuilding Tokenizers
+
+To retrain a tokenizer or re-export shards from the exact same selected documents, run `data/download_hf_docs_and_tokenize.py` against the published docs cache:
+
+```bash
+python3 data/download_hf_docs_and_tokenize.py \
+  --repo-id your-hf-username/your-dataset-repo \
+  --remote-root your_50B_export_root \
+  --output-root /tmp/my_custom_tokenizer_export \
+  --tokenizer-config ./data/tokenizer_specs.json
+```
+
+The sidecar `docs_selected.source_manifest.json` includes a `docs_sha256` checksum so you can verify you are rebuilding from exactly the same document list and order as the baseline export.
+
+<Note>
+Submissions that change the tokenizer are examined more carefully during review. If you retokenize, you must prove with certainty that `val_bpb` is correctly calculated, since tokenizer bugs can unjustly improve the score.
+</Note>
+
+## CPU-Heavy Export Knobs
+
+For large-scale shard exports, these environment variables tune tokenization throughput:
+
+```bash
+MATCHED_FINEWEB_SP_BATCH_SIZE=2048        # SentencePiece encoding batch size
+MATCHED_FINEWEB_TOKENIZER_THREADS=16      # tokenizer thread pool size
+MATCHED_FINEWEB_TIKTOKEN_THREADS=16       # tiktoken thread pool size
+MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE=512  # GPT-2 decode batch size
+```
+
+## Data Loading During Training
+
+The training script streams tokens from shards using two classes:
+
+### `TokenStream`
+
+Reads shards sequentially and wraps around forever. Shards are sorted by filename and cycled in order. The stream has no randomness or worker threads — it provides deterministic, simple sequential access.
+
+```python
+class TokenStream:
+    def __init__(self, pattern: str): ...
+    def take(self, n: int) -> Tensor: ...
+```
+
+`take(n)` returns the next `n` tokens, advancing across shard boundaries as needed and wrapping back to shard 0 after the last shard.
+
+### `DistributedTokenLoader`
+
+Wraps `TokenStream` for multi-GPU training. Each call to `next_batch()` takes a contiguous chunk of `TRAIN_BATCH_TOKENS + world_size` tokens from the stream, then slices out one disjoint `local_tokens + 1` span per rank. The extra token enables `(x, y)` construction by shifting.
+
+```python
+class DistributedTokenLoader:
+    def __init__(self, pattern, rank, world_size, device): ...
+    def next_batch(self, global_tokens, seq_len, grad_accum_steps) -> tuple[Tensor, Tensor]: ...
+```
+
+Gradient accumulation is handled by calling `next_batch` once per micro-step inside the accumulation loop. Each call consumes a fresh `local_tokens + 1` span from the stream.

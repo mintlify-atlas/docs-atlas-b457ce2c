@@ -1,0 +1,87 @@
+---
+title: "Record Submissions"
+description: "Requirements and checklist for submitting a new SOTA record to the parameter-golf leaderboard."
+---
+
+A record submission claims a new state-of-the-art score on the leaderboard. The bar is deliberately high: you must beat the existing best result by a meaningful margin and provide enough evidence to support the claim statistically.
+
+## What qualifies as a new record
+
+A submission qualifies as a new SOTA record if and only if it satisfies all of the following criteria:
+
+<AccordionGroup>
+  <Accordion title="1. Beat existing SOTA by at least 0.005 nats">
+    Your submission must achieve a `val_bpb` that corresponds to at least a **0.005-nat improvement** over the current best record. Small improvements below this threshold are not eligible for leaderboard placement, regardless of how many runs support them.
+  </Accordion>
+  <Accordion title="2. Statistical evidence: p < 0.01">
+    Because of inter-run variance, all submissions must provide enough run logs to show at `p < 0.01` that the 0.005-nat improvement was achieved. Include multiple run logs with your PR to support this claim.
+
+    **Exception:** For submissions that improve speed through systems optimization without changing the ML — for example, kernel rewrites, communication optimizations, or compiler improvements — the statistical requirement is waived.
+  </Accordion>
+  <Accordion title="3. Tokenizer and dataset changes must be verified">
+    If your submission changes the tokenizer or dataset, you must prove with certainty that `val_bpb` is correctly calculated. Submissions that edit the tokenizer will be examined much more carefully, since bugs in tokenizer handling can unjustly improve your score.
+  </Accordion>
+  <Accordion title="4. Reproducible in under 10 minutes on 8xH100">
+    The run must reproducibly complete in under 10 minutes on 8xH100 SXM GPUs. This is the **10+10 rule**: training must finish in under 10 minutes, and evaluation must also finish in under 10 minutes, both on the same 8xH100 hardware.
+  </Accordion>
+</AccordionGroup>
+
+## The 10+10 rule
+
+The compute budget for leaderboard submissions is strict:
+
+- **Training:** under 10 minutes on 8xH100 SXM
+- **Evaluation:** under 10 minutes on 8xH100 SXM (in addition to training time)
+
+<Info>
+  Evaluation at any sequence length is permitted, as in modded-nanogpt. You are encouraged to push the bounds of evaluation methods as aggressively as training methods — as long as the total evaluation wall-clock stays within the limit.
+</Info>
+
+## PR checklist
+
+Before opening a pull request for a record submission, confirm each of the following:
+
+<Steps>
+  <Step title="Beat SOTA by 0.005 nats">
+    Verify your `val_bpb` improvement over the current leaderboard leader corresponds to at least 0.005 nats. Check the leaderboard table in the repository README for the current best score.
+  </Step>
+  <Step title="Provide statistical evidence (p < 0.01)">
+    Include enough run logs — typically multiple independent runs — to show at `p < 0.01` that the improvement is real. If your submission is a systems-only optimization (no ML changes), this step is waived.
+  </Step>
+  <Step title="Validate tokenizer and dataset changes">
+    If you changed the tokenizer or dataset, include explicit proof in your README that `val_bpb` is calculated correctly. Describe how the tokenizer was validated.
+  </Step>
+  <Step title="Confirm reproducibility on 8xH100 in under 10 minutes">
+    Run the full training + evaluation on 8xH100 SXM hardware and confirm both stages finish within their respective 10-minute limits. Include the hardware info and wall-clock times in your README.
+  </Step>
+  <Step title="Include all required files">
+    Your PR folder must contain `README.md`, `submission.json`, `train.log`, and `train_gpt.py`. See [Submission Requirements](/submission/requirements) for details on each file and the `submission.json` format.
+  </Step>
+  <Step title="Submit as a pull request to the correct folder">
+    Open a PR that adds only your new folder under `/records/track_10min_16mb/` with a date-prefixed name such as `2026-03-17_RunName/`. Do not modify any other files in the repository.
+  </Step>
+</Steps>
+
+## Verification
+
+OpenAI does not automatically verify every submission, but top leaderboard entries will be verified over time. Any result that cannot be reproduced may be disqualified. If you encounter issues reproducing a submission, raise them on the original PR.
+
+<Warning>
+  Non-reproducible results can be disqualified at any time. Keep your training command and all dependencies in your PR folder so the run can be reproduced exactly.
+</Warning>
+
+## Compute grant
+
+Training on 8xH100 hardware can be expensive. OpenAI is sponsoring **$1,000,000 in compute credits** to help participants get started.
+
+<Card title="Request a compute grant" icon="circle-dollar-sign" href="https://openai.com/index/parameter-golf/#credit-form">
+  Use the compute grant form to request sponsored credits for your runs.
+</Card>
+
+## Seed tuning policy
+
+Tuning Adam hyperparameters across multiple runs is explicitly permitted. However, brute-forcing seeds to cherry-pick lucky initializations is not in the spirit of the challenge and may result in disqualification.
+
+<Note>
+  If you are unsure whether a particular approach crosses the line, ask in the #parameter-golf-discussions channel on the OpenAI Discord before submitting. There is no penalty for asking.
+</Note>

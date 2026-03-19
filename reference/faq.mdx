@@ -1,0 +1,85 @@
+---
+title: "FAQ"
+description: "Frequently asked questions about the Parameter Golf challenge rules, scoring, submissions, and evaluation."
+---
+
+<AccordionGroup>
+  <Accordion title="What exactly counts toward the 16MB artifact size?">
+    The submission artifact size is computed as **code bytes + compressed model bytes**. All counted code must live in the `train_gpt.py` script.
+
+    The cap is **decimal 16MB — 16,000,000 total bytes** — not 16 MiB (16,777,216 bytes).
+
+    No external downloads, training dataset access, or network calls are allowed during evaluation. The artifact must be fully self-contained and reproducible. Specifically:
+
+    - `train_gpt.py` is measured as raw UTF-8 bytes
+    - The model is measured as compressed bytes in the `final_model.int8.ptz` artifact (int8-quantized weights, zlib-compressed)
+    - Any external data your model needs at eval time must be baked into the 16MB limit
+  </Accordion>
+
+  <Accordion title="Are scores independently verified by OpenAI?">
+    OpenAI does not automatically verify every submission. However, **top leaderboard entries will be verified over time**.
+
+    Any non-reproducible results can be disqualified. If there are issues reproducing a submission, those issues should be raised on the pull request for that submission.
+
+    Providing complete run logs (automatically produced by `train_gpt.py` under `logs/`) is required for all submissions and is the primary means of verification.
+  </Accordion>
+
+  <Accordion title="What counts as 'external compute'? Is it fair to tune hyperparameters offline?">
+    There is no perfectly clean line, and the challenge reserves the right to disqualify runs that are not in the spirit of the challenge.
+
+    **Allowed:** Tuning Adam hyperparameters across a series of runs, architecture search, training curve analysis.
+
+    **Not allowed:** Brute-forcing seeds in a way that sneaks in additional compute unfairly (e.g., running thousands of seeds and cherry-picking the best result without disclosing it).
+
+    Use your best judgment. There is no penalty for asking questions before submitting.
+  </Accordion>
+
+  <Accordion title="What are the restrictions on evaluation?">
+    - **Time limit:** Submissions must complete evaluation in **under 10 minutes on 8xH100 SXM** (note: this is in addition to the 10-minute training limit)
+    - **Sequence length:** Evaluation at any sequence length is allowed
+    - **Training data access:** You cannot access any training data during evaluation unless you pay for those bits within the 16MB limit
+    - **Evaluation methods:** Aggressive, creative evaluation strategies are explicitly encouraged — push the bounds just as you would with training
+  </Accordion>
+
+  <Accordion title="Can I use a different tokenizer?">
+    Yes. The challenge uses bits-per-byte (BPB), a tokenizer-agnostic metric, specifically to allow tokenizer experimentation.
+
+    However, **submissions that change the tokenizer are examined much more carefully**. You must prove with certainty that `val_bpb` is correctly calculated. Tokenizer bugs — such as miscounting bytes per token — can unjustly improve your score and will result in disqualification.
+
+    If you retokenize from scratch, use `data/download_hf_docs_and_tokenize.py` with the published `docs_selected.jsonl` and `docs_selected.source_manifest.json` to ensure you are operating on the exact same document set as the baseline.
+  </Accordion>
+
+  <Accordion title="What GPUs can I use for development?">
+    You can experiment on any GPU hardware. There are no restrictions on development hardware.
+
+    **Final leaderboard submissions must run in under 10 minutes on 8xH100 SXM GPUs.** OpenAI is partnering with Runpod for easy access — see the Getting Started guide for instructions on launching a pod with the official Parameter Golf template.
+
+    OpenAI is also sponsoring $1,000,000 in compute credits for participants. Use the compute grant request form linked in the README to apply.
+  </Accordion>
+
+  <Accordion title="What Python dependencies are pre-installed on Runpod?">
+    All dependencies listed in `requirements.txt` are pre-installed in the official Runpod template image. After cloning the repo, you can immediately run the training script and data download commands without any `pip install` steps.
+
+    If you are running on a different machine or image, install the required packages manually before proceeding.
+  </Accordion>
+
+  <Accordion title="Can I access the FineWeb training data during evaluation?">
+    No. You are not permitted to access any training data during evaluation.
+
+    If you want to use training data at evaluation time (for example, for test-time training or retrieval), **those bits must be included within the 16MB artifact limit**. There are no exceptions — the artifact must be fully self-contained.
+  </Accordion>
+
+  <Accordion title="Where do I report issues with a submission?">
+    Raise issues directly **on the pull request for the relevant submission**. The submission PR is the canonical venue for discussion, reproducibility concerns, and disqualification challenges.
+
+    For general questions and discussion, join the OpenAI Discord server and visit the **#parameter-golf-discussions** and **#parameter-golf-announcements** channels.
+  </Accordion>
+
+  <Accordion title="How are inter-run variance and statistical significance handled?">
+    New SOTA records must beat the existing record by at least **0.005 nats**.
+
+    Because of inter-run variance, all submissions must provide enough run logs to show **p < 0.01** that the required 0.005-nat improvement was achieved. This means providing multiple independent training runs, not a single cherry-picked result.
+
+    This requirement is waived for submissions that improve speed through systems optimizations without changing the underlying ML (e.g., kernel rewrites that produce identical results faster).
+  </Accordion>
+</AccordionGroup>

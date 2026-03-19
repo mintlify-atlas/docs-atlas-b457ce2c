@@ -1,0 +1,123 @@
+---
+title: "Data setup"
+description: "Download and configure the FineWeb dataset and tokenizer variants for training."
+---
+
+Parameter Golf uses a cached, retokenized version of the [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) dataset. The downloader fetches pre-tokenized binary shards and tokenizer models from a Hugging Face repository, so you don't need to process raw text yourself.
+
+## Tokenizer variants
+
+The baseline uses `sp1024` — a 1024-token SentencePiece BPE vocabulary trained on FineWeb documents. The `--variant` flag selects which tokenizer family to download. Submissions that change the tokenizer will be examined carefully during review, since bugs may affect `val_bpb` scores.
+
+## Downloading data
+
+The download script is `data/cached_challenge_fineweb.py`. Pass `--variant` and optionally `--train-shards` to control how much training data to fetch.
+
+<Steps>
+  <Step title="Download for local smoke testing (1 shard)">
+    For quick local experiments, download a single training shard:
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 1
+    ```
+  </Step>
+
+  <Step title="Download the standard 8B token set (default)">
+    The default download fetches the full validation split plus 80 training shards (8B tokens):
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024
+    ```
+  </Step>
+
+  <Step title="Download the full 10B token set">
+    For the maximum training data available, fetch 100 shards:
+
+    ```bash
+    python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  Each shard contains 100,000,000 tokens. 80 shards = 8B tokens; 100 shards = 10B tokens.
+</Info>
+
+## Directory layout after download
+
+After running the downloader, your local layout looks like this:
+
+```
+data/
+  datasets/
+    fineweb10B_sp1024/
+      fineweb_train_*.bin   # Training shards
+      fineweb_val_*.bin     # Validation shards (fixed set)
+  tokenizers/
+    fineweb_1024_bpe.model  # SentencePiece model
+  manifest.json
+  docs_selected.jsonl
+  docs_selected.source_manifest.json
+```
+
+## Validation split
+
+The validation set is always the fixed first-50,000-document slice of FineWeb, stored in `fineweb_val_*` shards. It is always downloaded in full regardless of `--train-shards`. All `val_bpb` scores — local and leaderboard — are computed on this same split.
+
+## Using a custom dataset repository
+
+If you have exported your own dataset to Hugging Face (for example, a 50B token export with a custom tokenizer), override the repo and path with environment variables:
+
+```bash
+MATCHED_FINEWEB_REPO_ID=your-hf-username/your-dataset-repo \
+MATCHED_FINEWEB_REMOTE_ROOT_PREFIX=your_50B_export_root \
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
+```
+
+The default published repo is `willdepueoai/parameter-golf`, rooted under the `datasets/` subdirectory. The downloader is manifest-driven, so it fetches only the prefix of shards you request from a larger export.
+
+## Rebuilding tokenizers
+
+To retrain a tokenizer or re-export shards from the exact same selected documents, use the standalone retokenizer:
+
+```bash
+python3 data/download_hf_docs_and_tokenize.py \
+  --repo-id your-hf-username/your-dataset-repo \
+  --remote-root your_50B_export_root \
+  --output-root /tmp/my_custom_tokenizer_export \
+  --tokenizer-config ./data/tokenizer_specs.json
+```
+
+The sidecar `docs_selected.source_manifest.json` includes a `docs_sha256` field so you can verify you are rebuilding from the exact same document list and order as the baseline export.
+
+## Performance knobs
+
+For CPU-heavy export jobs, the following environment variables control parallelism and batch sizes during shard tokenization:
+
+| Variable | Description |
+|---|---|
+| `MATCHED_FINEWEB_SP_BATCH_SIZE` | Batch size for SentencePiece encoding (default: `2048`) |
+| `MATCHED_FINEWEB_TOKENIZER_THREADS` | Thread count for tokenizer encoding (default: `16`) |
+| `MATCHED_FINEWEB_TIKTOKEN_THREADS` | Thread count for tiktoken encoding (default: `16`) |
+| `MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE` | Batch size for GPT-2 decode in blobstore path (default: `512`) |
+
+Example with custom parallelism:
+
+```bash
+MATCHED_FINEWEB_SP_BATCH_SIZE=2048 \
+MATCHED_FINEWEB_TOKENIZER_THREADS=16 \
+MATCHED_FINEWEB_TIKTOKEN_THREADS=16 \
+MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE=512 \
+python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Local training" icon="laptop" href="/getting-started/local-training">
+    Run your first training job on Apple Silicon with the downloaded data.
+  </Card>
+  <Card title="Remote GPU training" icon="server" href="/getting-started/remote-gpu">
+    Scale up to cloud H100s for full leaderboard runs.
+  </Card>
+</CardGroup>

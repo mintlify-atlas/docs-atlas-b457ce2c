@@ -1,0 +1,140 @@
+---
+title: "Scoring & Evaluation"
+description: "How bits-per-byte is calculated, what counts toward the 16MB artifact, and the submission verification process."
+---
+
+The challenge ranks submissions by **bits-per-byte (BPB)** on the FineWeb validation set, measured after quantizing and compressing the model artifact. Lower BPB is better — it means the model assigns higher probability to each byte of held-out text.
+
+## Bits-per-byte (BPB)
+
+Cross-entropy loss is measured in **nats** (natural log units). BPB converts that into a tokenizer-agnostic compression rate measured per *byte* of source text rather than per *token*:
+
+```
+BPB = (val_loss / log(2)) * (tokens / bytes)
+```
+
+- `val_loss` — token-level cross-entropy loss in nats
+- `log(2)` — converts nats to bits
+- `tokens / bytes` — the tokenizer's compression ratio for the validation set
+
+### Why BPB instead of validation loss
+
+A model with a 1024-token vocabulary produces far fewer tokens per document than a model with a 50 000-token vocabulary. Comparing raw token-level losses would unfairly penalise small vocabularies, since each token must carry more information.
+
+BPB corrects for this: a small-vocabulary tokenizer produces fewer bits per token (each token covers fewer bytes), while a large-vocabulary tokenizer produces more bits per token (each token covers more bytes). The `tokens / bytes` factor in the formula cancels that out, making scores comparable across any tokenizer.
+
+<Info>
+BPB is the standard metric for lossless data-compression benchmarks. A BPB of 1.0 would mean the model compresses text to the same size as raw ASCII. State-of-the-art LLMs typically reach ~0.9 BPB on web text.
+</Info>
+
+## The `eval_val()` function
+
+The scoring logic lives in `eval_val()` in `train_gpt.py`. It accumulates three distributed counters across all ranks:
+
+```python
+val_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
+val_token_count = torch.zeros((), device=device, dtype=torch.float64)
+val_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+```
+
+Byte counting uses SentencePiece lookup tables built by `build_sentencepiece_luts()`:
+
+```python
+token_bytes = base_bytes_lut[tgt_ids].to(dtype=torch.int16)
+token_bytes += (has_leading_space_lut[tgt_ids] & ~is_boundary_token_lut[prev_ids]).to(dtype=torch.int16)
+val_byte_count += token_bytes.to(torch.float64).sum()
+```
+
+The leading-space correction ensures that tokens with a `▁` prefix (SentencePiece word-boundary marker) are counted as one extra byte — but only when the preceding token is not a boundary token (control/unknown/unused). This correctly handles the space that SentencePiece absorbs into the following token.
+
+After all batches are reduced across ranks:
+
+```python
+val_loss = val_loss_sum / val_token_count
+bits_per_token = val_loss.item() / math.log(2.0)
+tokens_per_byte = val_token_count.item() / val_byte_count.item()
+return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
+```
+
+## The 16 MB artifact limit
+
+The submission artifact is the sum of two quantities:
+
+```python
+code_bytes = len(code.encode("utf-8"))       # train_gpt.py source
+model_bytes = os.path.getsize("final_model.int8.ptz")  # int8 + zlib
+```
+
+The hard cap is **16,000,000 bytes** (decimal megabytes, not mebibytes):
+
+```
+code_bytes + model_bytes < 16,000,000
+```
+
+The baseline submission uses:
+- `15,815,847` bytes for the compressed model
+- `47,642` bytes for the training script
+- **`15,863,489` bytes total** — safely under the limit
+
+<Warning>
+The cap is 16,000,000 bytes (decimal), not 16,777,216 bytes (16 MiB). Do not confuse the two.
+</Warning>
+
+### What counts toward the artifact
+
+<CardGroup cols={2}>
+  <Card title="Counted" icon="check">
+    The `train_gpt.py` script (UTF-8 encoded byte length) plus the `final_model.int8.ptz` compressed model file.
+  </Card>
+  <Card title="Not counted" icon="x">
+    External downloads, network calls, or training dataset access during evaluation. These are also **not allowed**.
+  </Card>
+</CardGroup>
+
+## The final scoring metric
+
+Leaderboard scores come from the **post-quantization roundtrip** evaluation, logged as:
+
+```
+final_int8_zlib_roundtrip val_bpb: <score>
+```
+
+This means the model is:
+1. Quantized to int8 per-row with zlib compression
+2. Saved to `final_model.int8.ptz`
+3. Decompressed and dequantized back to bf16/fp32
+4. Evaluated on the full FineWeb validation split
+
+The roundtrip score is the official submission score, not the pre-quantization `val_bpb`.
+
+## Time limits
+
+<CardGroup cols={2}>
+  <Card title="Training" icon="clock">
+    Maximum 10 minutes wall-clock on 8×H100 SXM. The script enforces this with `MAX_WALLCLOCK_SECONDS=600`.
+  </Card>
+  <Card title="Evaluation" icon="timer">
+    Also under 10 minutes on 8×H100 SXM. This limit is in **addition** to the training time limit.
+  </Card>
+</CardGroup>
+
+## Submission verification
+
+OpenAI does not automatically verify every submission but will verify top leaderboard entries. Non-reproducible results can be disqualified.
+
+### SOTA record requirements
+
+<Steps>
+  <Step title="Beat SOTA by ≥ 0.005 nats">
+    New records must exceed the existing SOTA by at least 0.005 nats. Inter-run variance means multiple run logs are required.
+  </Step>
+  <Step title="Statistical significance: p &lt; 0.01">
+    Provide enough run logs to demonstrate at p &lt; 0.01 significance that the 0.005-nat improvement is real. This requirement is waived for pure systems optimisations that do not change the ML.
+  </Step>
+  <Step title="Reproducible in under 10 minutes">
+    The submitted `train_gpt.py` must successfully compile and run on 8×H100 SXM in under 10 minutes.
+  </Step>
+  <Step title="Tokenizer correctness (if modified)">
+    Submissions that edit the tokenizer are scrutinised more carefully because a miscalculated `val_bpb` may unjustly improve the score.
+  </Step>
+</Steps>
