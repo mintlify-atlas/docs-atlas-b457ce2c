@@ -16,8 +16,8 @@ The default published dataset is hosted at **`willdepueoai/parameter-golf`** on 
   <Card title="Shard size" icon="layers">
     100,000,000 tokens per shard (~200 MB each)
   </Card>
-  <Card title="Training shards" icon="circle-play">
-    Up to 180 shards available; default download is 80 (8B tokens)
+  <Card title="Default download" icon="circle-play">
+    80 training shards (8B tokens); maximum available determined by the manifest
   </Card>
   <Card title="Validation split" icon="chart-line">
     Fixed first-50k-document set, always downloaded in full
@@ -89,9 +89,6 @@ python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 1
 
 # Full 10B training tokens (100 shards)
 python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 100
-
-# All available shards (up to 180)
-python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 180
 ```
 
 Downloaded files are placed at:
@@ -182,7 +179,7 @@ class TokenStream:
 
 ### `DistributedTokenLoader`
 
-Wraps `TokenStream` for multi-GPU training. Each call to `next_batch()` takes a contiguous chunk of `TRAIN_BATCH_TOKENS + world_size` tokens from the stream, then slices out one disjoint `local_tokens + 1` span per rank. The extra token enables `(x, y)` construction by shifting.
+Wraps `TokenStream` for multi-GPU training. Each call to `next_batch()` takes a contiguous chunk from the stream sized for all ranks, then slices out one disjoint `local_tokens + 1` span per rank. The extra token enables `(x, y)` pair construction by shifting. Gradient accumulation is handled by calling `next_batch` once per micro-step.
 
 ```python
 class DistributedTokenLoader:

@@ -239,3 +239,23 @@ These variables configure the dataset download and tokenization scripts in `data
 <ParamField query="MATCHED_FINEWEB_GPT2_DECODE_BATCH_SIZE" type="integer">
   Batch size for GPT-2 decoding during the blobstore docs-cache path. Useful for tuning memory vs. throughput tradeoff.
 </ParamField>
+
+## MLX-Only Variables
+
+These variables are specific to `train_gpt_mlx.py` and have no effect on `train_gpt.py`.
+
+<ParamField query="MLX_MAX_MICROBATCH_TOKENS" type="integer" default="8192">
+  Maximum tokens per sub-batch within each logical microbatch. MLX splits each microbatch into smaller chunks of at most this size to reduce peak memory pressure on Apple Silicon without changing the effective optimizer batch size.
+</ParamField>
+
+<ParamField query="GRAD_ACCUM_STEPS" type="integer" default="8">
+  Number of gradient accumulation steps per optimizer update in `train_gpt_mlx.py`. In `train_gpt.py` this is always derived as `8 // WORLD_SIZE` and is not independently configurable.
+</ParamField>
+
+<ParamField query="OUT_DIR" type="string" default="logs">
+  Output directory for log files and model artifacts in `train_gpt_mlx.py`. In `train_gpt.py` the log directory is always `logs/` and is not configurable.
+</ParamField>
+
+<ParamField query="LOGIT_CHUNK_TOKENS" type="integer" default="0">
+  Number of tokens per logit computation chunk in `train_gpt_mlx.py`. Set to a positive value to reduce peak memory by computing the final projection and cross-entropy loss in chunks. `0` (default) computes all tokens in a single matmul.
+</ParamField>

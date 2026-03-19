@@ -78,7 +78,13 @@ The default published repo is `willdepueoai/parameter-golf`, rooted under the `d
 
 ## Rebuilding tokenizers
 
-To retrain a tokenizer or re-export shards from the exact same selected documents, use the standalone retokenizer:
+To retokenize from scratch, you first need the source documents. Pass `--with-docs` to the downloader to also fetch `docs_selected.jsonl` and its sidecar manifest:
+
+```bash
+python3 data/cached_challenge_fineweb.py --variant sp1024 --with-docs
+```
+
+Then run the standalone retokenizer against the downloaded docs:
 
 ```bash
 python3 data/download_hf_docs_and_tokenize.py \

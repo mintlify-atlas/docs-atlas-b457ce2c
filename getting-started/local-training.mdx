@@ -73,7 +73,7 @@ Validation always runs on the full `fineweb_val_*` split — the fixed first-50,
 | `RUN_ID` | random UUID | Name for this run's log directory |
 | `ITERATIONS` | `20000` | Number of training steps |
 | `TRAIN_BATCH_TOKENS` | `524288` | Tokens per training step |
-| `VAL_LOSS_EVERY` | `0` | Validate every N steps; `0` = end only |
+| `VAL_LOSS_EVERY` | `0` (MLX default) | Validate every N steps; `0` = end only. Note: `train_gpt.py` defaults to `1000`. |
 | `VAL_BATCH_SIZE` | `524288` | Tokens per validation pass |
 | `MAX_WALLCLOCK_SECONDS` | `600` | Hard stop after this many seconds |
 | `DATA_PATH` | `./data/datasets/fineweb10B_sp1024` | Path to dataset shards |
